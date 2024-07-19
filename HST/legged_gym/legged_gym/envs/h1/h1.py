@@ -1094,7 +1094,35 @@ class H1():
         rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
         self.feet_air_time *= ~contact_filt
         return rew_airTime
+
+    def _reward_feet_air_time(self):
+        # Reward long steps
+        # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
+        contact = self.contact_forces[:, self.feet_indices, 2] > 1.
+        contact_filt = torch.logical_or(contact, self.last_contacts) 
+        self.last_contacts = contact
+        first_contact = (self.feet_air_time > 0.) * contact_filt
+        self.feet_air_time += self.dt
+        rew_airTime = torch.sum((self.feet_air_time - 0.5) * first_contact, dim=1) # reward only on first contact with the ground
+        rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
+        self.feet_air_time *= ~contact_filt
+        return rew_airTime
     
+    def _reward_contact(self):
+        # Reward long steps
+        # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
+        contact = torch.where(self.contact_forces[:, self.feet_indices[0], 2] > 1, torch.ones_like(self.contact_forces[:,0,0]), torch.zeros_like(self.contact_forces[:,0,0]))
+        contact2 = torch.where(self.contact_forces[:, self.feet_indices[1], 2] > 1, torch.ones_like(self.contact_forces[:,0,0]), torch.zeros_like(self.contact_forces[:,0,0]))
+        rew_contact = contact * contact2 * 5 - 5
+        return rew_contact
+
+    def _reward_feet_height(self):
+        """
+        Calculates the reward based on the distance between the feet. Penalize feet get close to each other or too far away.
+        """
+        foot_height = torch.sum(self.rigid_state[:, self.feet_indices, 2], dim=1)
+        return torch.square(foot_height)#(torch.exp(-torch.abs(d_min) * 100) + torch.exp(-torch.abs(d_max) * 100)) / 2
+
     def _reward_stumble(self):
         # Penalize feet hitting vertical surfaces
         return torch.any(torch.norm(self.contact_forces[:, self.feet_indices, :2], dim=2) >\
