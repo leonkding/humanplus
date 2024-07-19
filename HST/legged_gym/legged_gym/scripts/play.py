@@ -40,6 +40,8 @@ import torch
 
 
 def play(args):
+    print(args.task)
+    print(args.load_run)
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task, load_run=args.load_run)
     # override some parameters for testing
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
@@ -118,7 +120,7 @@ def play(args):
             logger.print_rewards()
 
 if __name__ == '__main__':
-    EXPORT_POLICY = True
+    EXPORT_POLICY = False
     RECORD_FRAMES = False
     MOVE_CAMERA = False
     args = get_args(test=True)

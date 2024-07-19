@@ -160,7 +160,7 @@ class H1():
 
 
     def _init_target_jt(self):
-        self.target_jt_seq, self.target_jt_seq_len = load_target_jt(self.device, self.cfg.human.filename, self.default_dof_pos)
+        self.target_jt_seq, self.target_vel_seq, self.target_jt_seq_len = load_target_jt(self.device, self.cfg.human.filename, self.default_dof_pos)
         self.num_target_jt_seq, self.max_target_jt_seq_len, self.dim_target_jt = self.target_jt_seq.shape
         print(f"Loaded target joint trajectories of shape {self.target_jt_seq.shape}")
         assert(self.dim_target_jt == self.num_dofs)
@@ -179,11 +179,13 @@ class H1():
 
     def update_target_jt(self, reset_env_ids):
         self.target_jt = self.target_jt_seq[self.target_jt_i, self.target_jt_j]
+        self.commands[:,:3] = self.target_vel_seq[self.target_jt_i]
         self.delayed_obs_target_jt = self.target_jt_seq[self.target_jt_i, torch.maximum(self.target_jt_j - self.delayed_obs_target_jt_steps_int, torch.tensor(0))]
         resample_i = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         if self.common_step_counter % self.target_jt_update_steps_int == 0:
             self.target_jt_j += 1
-            jt_eps_end_bool = self.target_jt_j >= self.target_jt_seq_len
+            jt_eps_end_bool = self.target_jt_j >= self.target_jt_seq_len[self.target_jt_i]
+            #print(jt_eps_end_bool)
             self.target_jt_j = torch.where(jt_eps_end_bool, torch.zeros_like(self.target_jt_j), self.target_jt_j)
             resample_i[jt_eps_end_bool.nonzero(as_tuple=False).flatten()] = True
             self.target_jt_update_steps_int = sample_int_from_float(self.target_jt_update_steps)
@@ -342,6 +344,7 @@ class H1():
         self.rew_buf[:] = 0.
         for i in range(len(self.reward_functions)):
             name = self.reward_names[i]
+            #print(self.reward_functions[i]())
             unscaled_rew, metric = self.reward_functions[i]()
             rew = unscaled_rew * self.reward_scales[name]
             self.rew_buf += rew
@@ -1099,7 +1102,7 @@ class H1():
         
     def _reward_stand_still(self):
         # Penalize motion at zero commands
-        return torch.sum(torch.abs(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :2], dim=1) < 0.1)
+        return torch.sum(torch.abs(self.dof_pos[:,:] - self.default_dof_pos[:,:]), dim=1) * (torch.norm(self.commands[:, :2], dim=1) < 0.1), torch.sum(torch.abs(self.dof_pos[:,0:10] - self.default_dof_pos[:,0:10]), dim=1) * (torch.norm(self.commands[:, :2], dim=1) < 0.1)
 
     def _reward_feet_contact_forces(self):
         # penalize high contact forces
@@ -1107,7 +1110,7 @@ class H1():
 
     def _reward_target_jt(self):
         # Penalize distance to target joint angles
-        target_jt_error = torch.mean(torch.abs(self.dof_pos - self.target_jt), dim=1)
+        target_jt_error = torch.mean(torch.abs(self.dof_pos[:,10:] - self.target_jt[:,10:]), dim=1) + torch.mean((torch.abs(self.dof_pos[:,0:10] - self.default_dof_pos[:,0:10])), dim=1)
         return torch.exp(-4 * target_jt_error), target_jt_error
 
     

@@ -33,12 +33,13 @@ from legged_gym.envs.base.base_config import BaseConfig
 class H1RoughCfg( BaseConfig ):
     class human:
         delay = 0.0 # delay in seconds
-        freq = 10
+        freq = 30
         resample_on_env_reset = True
-        filename = 'ACCAD_walk_10fps.npy'
+        filename = '/home/ps/amass_pose.pkl'
+        #filename = '/home/ps/humanplus/HST/legged_gym/ACCAD_walk_10fps.npy'
         
     class env:
-        num_envs = 2048
+        num_envs = 1800#48
         num_dofs = 19
         num_observations = 65 + num_dofs  # TODO
         num_privileged_obs = None # if not None a priviledge_obs_buf will be returned by step() (critic obs for assymetric training). None is returned otherwise 
@@ -51,7 +52,7 @@ class H1RoughCfg( BaseConfig ):
         obs_context_len = 8
 
     class terrain:
-        mesh_type = "trimesh" # none, plane, heightfield or trimesh
+        mesh_type = "plane" # none, plane, heightfield or trimesh
         horizontal_scale = 0.1 # [m]
         vertical_scale = 0.005 # [m]
         border_size = 25 # [m]
@@ -82,7 +83,7 @@ class H1RoughCfg( BaseConfig ):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [0.9, 0.9] # min max [m/s]
+            lin_vel_x = [0., 0.] # min max [m/s]
             lin_vel_y = [0, 0]   # min max [m/s]
             ang_vel_yaw = [0, 0]    # min max [rad/s]
             heading = [0, 0]
@@ -271,7 +272,7 @@ class H1RoughCfgPPO(BaseConfig):
         policy_class_name = 'ActorCriticTransformer'
         algorithm_class_name = 'PPO'
         num_steps_per_env = 32 # per iteration
-        max_iterations = 15000 # number of policy updates
+        max_iterations = 50000 # number of policy updates
 
         # logging
         save_interval = 1000 # check for potential saves every this many iterations

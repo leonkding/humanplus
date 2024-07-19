@@ -40,7 +40,7 @@ from rsl_rl.runners import OnPolicyRunner
 from legged_gym import LEGGED_GYM_ROOT_DIR, LEGGED_GYM_ENVS_DIR
 from .helpers import get_args, update_cfg_from_args, class_to_dict, get_load_path, set_seed, parse_sim_params
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
-from .logger import log_files
+#from .logger import log_files
 
 class TaskRegistry():
     def __init__(self):
@@ -62,7 +62,7 @@ class TaskRegistry():
     def get_cfgs(self, name, load_run=None) -> Tuple[LeggedRobotCfg, LeggedRobotCfgPPO]:
         if load_run is not None:
             from runpy import run_path
-            cfg_path = f'./logs/rough_h1/{load_run}/h1_config.py'
+            cfg_path = f'./h1_config.py'
             cfgs = run_path(cfg_path)
             train_cfg = cfgs['H1RoughCfgPPO']
             env_cfg = cfgs['H1RoughCfg']
@@ -159,8 +159,8 @@ class TaskRegistry():
         train_cfg_dict = class_to_dict(train_cfg)
         runner = OnPolicyRunner(env, train_cfg_dict, log_dir, device=args.rl_device)
 
-        if not args.test:
-            log_files(log_dir, self.curr_task_path)
+        #if not args.test:
+        #    log_files(log_dir, self.curr_task_path)
 
         #save resume path before creating a new log_dir
         resume = train_cfg.runner.resume

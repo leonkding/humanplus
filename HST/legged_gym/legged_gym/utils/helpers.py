@@ -111,17 +111,20 @@ def get_load_path(root, load_run=-1, checkpoint=-1):
         raise ValueError("No runs in this directory: " + root)
     if load_run==-1:
         load_run = last_run
+        print('wwwww')
+        print(load_run)
     else:
         load_run = os.path.join(root, load_run)
 
     if checkpoint==-1:
-        models = [file for file in os.listdir(load_run) if 'model' in file]
-        models.sort(key=lambda m: '{0:0>15}'.format(m))
-        model = models[-1]
+        print(load_run)
+        #models = [file for file in os.listdir(load_run) if 'model' in file]
+        #models.sort(key=lambda m: '{0:0>15}'.format(m))
+        #model = models[-1]
     else:
         model = "model_{}.pt".format(checkpoint) 
 
-    load_path = os.path.join(load_run, model)
+    load_path = '/home/ps/humanplus/HST/legged_gym/logs/rough_h1/0001_test/model_46000.pt'#os.path.join(load_run, model)
     return load_path
 
 def update_cfg_from_args(env_cfg, train_cfg, args):
