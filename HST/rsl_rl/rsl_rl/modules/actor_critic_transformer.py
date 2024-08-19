@@ -33,6 +33,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
+from rsl_rl.models.decision_transformer import DecisionTransformer
+from rsl_rl.models.model import PPOTransformerModel
 
 # a BERT-style transformer block
 class Transformer_Block(nn.Module):
@@ -109,6 +111,82 @@ class ActorCriticTransformer(nn.Module):
 
         # Value function
         self.critic = Transformer(num_critic_obs, 1, obs_context_len)
+
+        print(f"Actor MLP: {self.actor}")
+        print(f"Critic MLP: {self.critic}")
+
+        # Action noise
+        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        self.distribution = None
+        # disable args validation for speedup
+        Normal.set_default_validate_args = False
+
+    def reset(self, dones=None):
+        pass
+
+    def forward(self):
+        raise NotImplementedError
+    
+    @property
+    def action_mean(self):
+        return self.distribution.mean
+
+    @property
+    def action_std(self):
+        return self.distribution.stddev
+    
+    @property
+    def entropy(self):
+        return self.distribution.entropy().sum(dim=-1)
+
+    def update_distribution(self, observations):
+        mean = self.actor(observations)
+        self.distribution = Normal(mean, self.std)
+
+    def act(self, observations, **kwargs):
+        self.update_distribution(observations)
+        return self.distribution.sample()
+    
+    def get_actions_log_prob(self, actions):
+        return self.distribution.log_prob(actions).sum(dim=-1)
+
+    def act_inference(self, observations):
+        actions_mean = self.actor(observations)
+        return actions_mean
+
+    def evaluate(self, critic_observations, **kwargs):
+        value = self.critic(critic_observations)
+        return value
+
+class TeachingActorCriticTransformer(nn.Module):
+    is_recurrent = False
+    def __init__(self,  num_actor_obs,
+                        num_critic_obs,
+                        num_actions,
+                        obs_context_len, 
+                        init_noise_std=1.0,
+                        **kwargs):
+        if kwargs:
+            print("ActorCriticTransformer.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
+        super(ActorCriticTransformer, self).__init__()
+
+        # Policy
+        #self.actor = Transformer(num_actor_obs, num_actions, obs_context_len)
+
+        config = {"transformer":{ 
+                "num_blocks":2,
+                "num_heads":6,
+                "gru_bias":0.0,
+                "hidden_size":128,
+                "embed_dim": 384,
+                "memory_length":15,
+            }}
+        self.actor = PPOTransformerModel(config, mlp_input_dim_a, num_actions) 
+
+        self.actor.output_layer[1].weight.data *= 0.01 # init last layer to be 100x smaller
+
+        # Value function
+        #self.critic = Transformer(num_critic_obs, 1, obs_context_len)
 
         print(f"Actor MLP: {self.actor}")
         print(f"Critic MLP: {self.critic}")
