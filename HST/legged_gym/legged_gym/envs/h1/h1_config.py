@@ -33,10 +33,10 @@ from legged_gym.envs.base.base_config import BaseConfig
 class H1RoughCfg( BaseConfig ):
     class human:
         delay = 0.0 # delay in seconds
-        freq = 30
+        freq = 10
         resample_on_env_reset = True
-        filename = '/home/ps/amass_pose.pkl'
-        #filename = '/home/ps/humanplus/HST/legged_gym/ACCAD_walk_10fps.npy'
+        #filename = '/home/ps/h1_res.pkl'
+        filename = '/home/ps/humanplus/HST/legged_gym/ACCAD_walk_10fps.npy'
         
     class env:
         num_envs = 1800#48
@@ -83,13 +83,13 @@ class H1RoughCfg( BaseConfig ):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges:
-            lin_vel_x = [0., 0.] # min max [m/s]
+            lin_vel_x = [-0.5, 1.] # min max [m/s]
             lin_vel_y = [0, 0]   # min max [m/s]
             ang_vel_yaw = [0, 0]    # min max [rad/s]
             heading = [0, 0]
 
     class init_state:
-        pos = [0.0, 0.0, 1.05] # x,y,z [m]
+        pos = [0.0, 0.0, 1.] # x,y,z [m]
         rot = [0.0, 0.0, 0.0, 1.0] # x,y,z,w [quat]
         lin_vel = [0.0, 0.0, 0.0]  # x,y,z [m/s]
         ang_vel = [0.0, 0.0, 0.0]  # x,y,z [rad/s]
@@ -124,7 +124,7 @@ class H1RoughCfg( BaseConfig ):
         action_scale = 1.0
         clip_actions = True
         # decimation: Number of control action updates @ sim DT per policy DT
-        decimation = 4
+        decimation = 20
         
     class asset:
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/h1/urdf/h1.urdf'
@@ -150,7 +150,7 @@ class H1RoughCfg( BaseConfig ):
 
     class domain_rand:
         randomize_friction = True
-        friction_range = [0.0, 2.0]
+        friction_range = [0.2, 2.0]
         randomize_base_mass = True
         added_mass_range = [-1., 1.]
         push_robots = True
@@ -160,22 +160,26 @@ class H1RoughCfg( BaseConfig ):
     class rewards:
         class scales:
             termination = -0.0
-            tracking_lin_vel = 0.1
-            tracking_ang_vel = 0.1
-            lin_vel_z = -0
-            ang_vel_xy = -0
-            orientation = -0.
+            tracking_lin_vel = 4
+            tracking_ang_vel = 4
+            lin_vel_z = -2
+            ang_vel_xy = -1
+            orientation = -1.
             torques = -0.0
             dof_vel = -0.
             dof_acc = -0.
-            base_height = -0. 
-            feet_air_time = 0.
+            base_height = -100. 
+            feet_air_time = 1.
             collision = -0.
             feet_stumble = -0.0 
-            action_rate = -0.
-            stand_still = -0.
-            dof_pos_limits = -0.0
-            target_jt = 1
+            action_rate = -0.01
+            stand_still = 0#-1.
+            dof_pos_limits = -10.0
+            target_jt = 0#30
+            #feet_height = -200
+            target_lower_body = 0#10
+            two_feet_contact = 0#-500
+            energy_substeps = 0#-3e-7
 
         only_positive_rewards = False # if true negative total rewards are clipped at zero (avoids early termination problems)
         tracking_sigma = 0.25 # tracking reward = exp(-error^2/sigma)
@@ -203,7 +207,7 @@ class H1RoughCfg( BaseConfig ):
         # clip_actions = 100.
 
     class noise:
-        add_noise = False
+        add_noise = True#False
         noise_level = 1.0 # scales other values
         class noise_scales:
             dof_pos = 0.01
@@ -221,7 +225,7 @@ class H1RoughCfg( BaseConfig ):
         lookat = [11., 5, 3.]  # [m]
 
     class sim:
-        dt =  0.005
+        dt =  0.001
         substeps = 2
         gravity = [0., 0., -9.81]  # [m/s^2]
         up_axis = 1  # 0 is y, 1 is z
@@ -245,6 +249,7 @@ class H1RoughCfgPPO(BaseConfig):
     runner_class_name = 'OnPolicyRunner'
     class policy:
         init_noise_std = 1.0
+        teaching_model_path = None#'/home/ps/humanplus/HST/legged_gym/logs/h1/0005_noise_feetcont/model_3000.pt'
         # actor_hidden_dims = [512, 256, 128]
         # critic_hidden_dims = [512, 256, 128]
         # activation = 'elu' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
@@ -256,6 +261,7 @@ class H1RoughCfgPPO(BaseConfig):
     class algorithm:
         # training params
         value_loss_coef = 1.0
+        imitation_coef = 10
         use_clipped_value_loss = True
         clip_param = 0.2
         entropy_coef = 1e-5
@@ -266,20 +272,21 @@ class H1RoughCfgPPO(BaseConfig):
         gamma = 0.99
         lam = 0.95
         desired_kl = 0.01
-        max_grad_norm = 1.
+        max_grad_norm = 0.2
 
     class runner:
         policy_class_name = 'ActorCriticTransformer'
+        teaching_policy_class_name = 'ActorCriticTransformer'
         algorithm_class_name = 'PPO'
         num_steps_per_env = 32 # per iteration
         max_iterations = 50000 # number of policy updates
 
         # logging
         save_interval = 1000 # check for potential saves every this many iterations
-        experiment_name = 'rough_h1'
+        experiment_name = 'h1'
         run_name = None
         # load and resume
         resume = False
         load_run = -1 # -1 = last run
         checkpoint = -1 # -1 = last saved model
-        resume_path = None # updated from load_run and chkpt
+        resume_path = '/home/ps/humanplus/HST/legged_gym/logs/h1/0006_noise_feetcont/model_9000.pt' # updated from load_run and chkpt

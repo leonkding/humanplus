@@ -62,16 +62,32 @@ class OnPolicyRunner:
             num_critic_obs = self.env.num_privileged_obs 
         else:
             num_critic_obs = self.env.num_obs
-        actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
-        actor_critic: ActorCriticTransformer = actor_critic_class( 
+        actor_critic_class = eval(self.cfg["teaching_policy_class_name"]) # ActorCritic
+        self.teaching_actor_critic: ActorCriticTransformer = actor_critic_class( 
             self.env.num_obs,
             num_critic_obs,
             self.env.num_actions,
             self.env.obs_context_len,
             **self.policy_cfg
         ).to(self.device)
+
+        if self.policy_cfg['teaching_model_path'] != None:
+            self.teaching_actor_critic.load_state_dict(torch.load(self.policy_cfg['teaching_model_path'])['model_state_dict'])
+        else:
+            self.teaching_actor_critic = None
+
+        actor_critic_class = eval(self.cfg["policy_class_name"]) # ActorCritic
+        actor_critic: ActorCritic = actor_critic_class( 
+            self.env.num_obs,
+            num_critic_obs,
+            self.env.num_actions,
+            self.env.obs_context_len,
+            **self.policy_cfg
+        ).to(self.device)
+
         alg_class = eval(self.cfg["algorithm_class_name"]) # PPO
-        self.alg = PPO(actor_critic, device=self.device, **self.alg_cfg)
+
+        self.alg = PPO(actor_critic, self.teaching_actor_critic, device=self.device, **self.alg_cfg)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
 
@@ -114,6 +130,8 @@ class OnPolicyRunner:
             with torch.inference_mode():
                 for i in range(self.num_steps_per_env):
                     actions = self.alg.act(obs, critic_obs)
+                    #print('actions')
+                    #print(actions.shape)
                     obs, privileged_obs, rewards, dones, infos = self.env.step(actions)
                     critic_obs = privileged_obs if privileged_obs is not None else obs
                     obs, critic_obs, rewards, dones = obs.to(self.device), critic_obs.to(self.device), rewards.to(self.device), dones.to(self.device)
@@ -141,7 +159,7 @@ class OnPolicyRunner:
                 start = stop
                 self.alg.compute_returns(critic_obs)
             
-            mean_value_loss, mean_surrogate_loss = self.alg.update()
+            mean_value_loss, mean_surrogate_loss, mean_imitation_loss = self.alg.update()
             stop = time.time()
             learn_time = stop - start
             if self.log_dir is not None:
@@ -191,6 +209,7 @@ class OnPolicyRunner:
 
         wandb_dict['Loss/value_function'] = locs['mean_value_loss']
         wandb_dict['Loss/surrogate'] = locs['mean_surrogate_loss']
+        wandb_dict['Loss/imitation'] = locs['mean_imitation_loss']
         wandb_dict['Loss/entropy'] = entropy
         wandb_dict['Loss/learning_rate'] = self.alg.learning_rate
         wandb_dict['Perf/total_fps'] = fps
@@ -219,6 +238,7 @@ class OnPolicyRunner:
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                          f"""{'Imitation loss:':>{pad}} {locs['mean_imitation_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std:.2f}\n"""
                           f"""{'Mean reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
                           f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n""")
@@ -231,6 +251,7 @@ class OnPolicyRunner:
                             'collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
                           f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
                           f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+                          f"""{'Imitation loss:':>{pad}} {locs['mean_imitation_loss']:.4f}\n"""
                           f"""{'Mean action noise std:':>{pad}} {mean_std:.2f}\n""")
                         #   f"""{'Mean reward/step:':>{pad}} {locs['mean_reward']:.2f}\n"""
                         #   f"""{'Mean episode length/episode:':>{pad}} {locs['mean_trajectory_length']:.2f}\n""")

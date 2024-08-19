@@ -160,7 +160,7 @@ class H1():
 
 
     def _init_target_jt(self):
-        self.target_jt_seq, self.target_vel_seq, self.target_jt_seq_len = load_target_jt(self.device, self.cfg.human.filename, self.default_dof_pos)
+        self.target_jt_seq, self.target_jt_seq_len = load_target_jt(self.device, self.cfg.human.filename, self.default_dof_pos)
         self.num_target_jt_seq, self.max_target_jt_seq_len, self.dim_target_jt = self.target_jt_seq.shape
         print(f"Loaded target joint trajectories of shape {self.target_jt_seq.shape}")
         assert(self.dim_target_jt == self.num_dofs)
@@ -179,11 +179,15 @@ class H1():
 
     def update_target_jt(self, reset_env_ids):
         self.target_jt = self.target_jt_seq[self.target_jt_i, self.target_jt_j]
-        self.commands[:,:3] = self.target_vel_seq[self.target_jt_i]
+        #self.commands[:,:3] = self.target_vel_seq[self.target_jt_i]
         self.delayed_obs_target_jt = self.target_jt_seq[self.target_jt_i, torch.maximum(self.target_jt_j - self.delayed_obs_target_jt_steps_int, torch.tensor(0))]
         resample_i = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         if self.common_step_counter % self.target_jt_update_steps_int == 0:
             self.target_jt_j += 1
+            # print('wwww')
+            # print(self.target_jt_seq_len)
+            # print(self.target_jt_i)
+            # print(self.target_jt_seq_len[self.target_jt_i])
             jt_eps_end_bool = self.target_jt_j >= self.target_jt_seq_len[self.target_jt_i]
             #print(jt_eps_end_bool)
             self.target_jt_j = torch.where(jt_eps_end_bool, torch.zeros_like(self.target_jt_j), self.target_jt_j)
@@ -203,8 +207,12 @@ class H1():
             actions (torch.Tensor): Tensor of shape (num_envs, num_actions_per_env)
         """
         # step physics and render each frame
+        actions[:,10:] = actions[:,10:] * 0
+        #print(actions[0,:])
         self.render()
         if self.action_delay != -1:
+            #print(self.action_history_buf[:, 1:].shape)
+            #print(actions[:, None, :].shape)
             self.action_history_buf = torch.cat([self.action_history_buf[:, 1:], actions[:, None, :]], dim=1)
             actions = self.action_history_buf[:, -self.action_delay - 1] # delay for 1/50=20ms
         self.actions = actions.clone()
@@ -242,7 +250,7 @@ class H1():
         self.base_lin_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel[:] = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.base_orn_rp[:] = self.get_body_orientation()
-        # self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        self.projected_gravity[:] = quat_rotate_inverse(self.base_quat, self.gravity_vec)
 
         self._post_physics_step_callback()
 
@@ -529,6 +537,8 @@ class H1():
         """
         #pd controller
         actions_scaled = actions * self.cfg.control.action_scale
+        #print('ww')
+        #print(actions[0,:])
         control_type = self.cfg.control.control_type
         if control_type=="P":
             target_dof_pos = actions_scaled + self.default_dof_pos
@@ -653,9 +663,12 @@ class H1():
         actor_root_state = self.gym.acquire_actor_root_state_tensor(self.sim)
         dof_state_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         net_contact_forces = self.gym.acquire_net_contact_force_tensor(self.sim)
+        rigid_body_state = self.gym.acquire_rigid_body_state_tensor(self.sim)
+
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_actor_root_state_tensor(self.sim)
         self.gym.refresh_net_contact_force_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # create some wrapper tensors for different slices
         self.root_states = gymtorch.wrap_tensor(actor_root_state)
@@ -665,6 +678,8 @@ class H1():
         self.base_quat = self.root_states[:, 3:7]
 
         self.contact_forces = gymtorch.wrap_tensor(net_contact_forces).view(self.num_envs, -1, 3) # shape: num_envs, num_bodies, xyz axis
+        #print(self.contact_forces.shape)
+        self.rigid_state = gymtorch.wrap_tensor(rigid_body_state).view(self.num_envs, 20, 13)
 
         # initialize some data used later on
         self.common_step_counter = 0
@@ -687,7 +702,7 @@ class H1():
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.base_orn_rp = self.get_body_orientation() # [r, p]
-        # self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
+        self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
         self.measured_heights = 0
@@ -1018,20 +1033,20 @@ class H1():
     #------------ reward functions----------------
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
-        return torch.square(self.base_lin_vel[:, 2])
+        return torch.square(self.base_lin_vel[:, 2]), torch.square(self.base_lin_vel[:, 2])
     
     def _reward_ang_vel_xy(self):
         # Penalize xy axes base angular velocity
-        return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
+        return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1),torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
     
     def _reward_orientation(self):
         # Penalize non flat base orientation
-        return torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
+        return torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1), torch.sum(torch.square(self.projected_gravity[:, :2]), dim=1)
 
     def _reward_base_height(self):
         # Penalize base height away from target
         base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
-        return torch.square(base_height - self.cfg.rewards.base_height_target)
+        return torch.square(base_height - self.cfg.rewards.base_height_target), torch.square(base_height - self.cfg.rewards.base_height_target)
     
     def _reward_torques(self):
         # Penalize torques
@@ -1047,7 +1062,7 @@ class H1():
     
     def _reward_action_rate(self):
         # Penalize changes in actions
-        return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+        return torch.sum(torch.square(self.last_actions - self.actions), dim=1), torch.sum(torch.square(self.last_actions - self.actions), dim=1)
     
     def _reward_collision(self):
         # Penalize collisions on selected bodies
@@ -1061,7 +1076,7 @@ class H1():
         # Penalize dof positions too close to the limit
         out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0]).clip(max=0.) # lower limit
         out_of_limits += (self.dof_pos - self.dof_pos_limits[:, 1]).clip(min=0.)
-        return torch.sum(out_of_limits, dim=1)
+        return torch.sum(out_of_limits, dim=1), torch.sum(out_of_limits, dim=1)
 
     def _reward_dof_vel_limits(self):
         # Penalize dof velocities too close to the limit
@@ -1093,35 +1108,25 @@ class H1():
         rew_airTime = torch.sum((self.feet_air_time - 0.5) * first_contact, dim=1) # reward only on first contact with the ground
         rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
         self.feet_air_time *= ~contact_filt
-        return rew_airTime
-
-    def _reward_feet_air_time(self):
-        # Reward long steps
-        # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
-        contact = self.contact_forces[:, self.feet_indices, 2] > 1.
-        contact_filt = torch.logical_or(contact, self.last_contacts) 
-        self.last_contacts = contact
-        first_contact = (self.feet_air_time > 0.) * contact_filt
-        self.feet_air_time += self.dt
-        rew_airTime = torch.sum((self.feet_air_time - 0.5) * first_contact, dim=1) # reward only on first contact with the ground
-        rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
-        self.feet_air_time *= ~contact_filt
-        return rew_airTime
+        return rew_airTime, rew_airTime
     
-    def _reward_contact(self):
+    def _reward_two_feet_contact(self):
         # Reward long steps
         # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
         contact = torch.where(self.contact_forces[:, self.feet_indices[0], 2] > 1, torch.ones_like(self.contact_forces[:,0,0]), torch.zeros_like(self.contact_forces[:,0,0]))
         contact2 = torch.where(self.contact_forces[:, self.feet_indices[1], 2] > 1, torch.ones_like(self.contact_forces[:,0,0]), torch.zeros_like(self.contact_forces[:,0,0]))
-        rew_contact = contact * contact2 * 5 - 5
-        return rew_contact
+        rew_both_no_contact = (1-contact) * (1-contact2) 
+        rew_both_contact = contact * contact2 
+        rew_single_contact = torch.ones_like(contact) - rew_both_no_contact - rew_both_contact
+        #print(rew_contact)
+        return rew_single_contact, rew_single_contact
 
     def _reward_feet_height(self):
         """
         Calculates the reward based on the distance between the feet. Penalize feet get close to each other or too far away.
         """
         foot_height = torch.sum(self.rigid_state[:, self.feet_indices, 2], dim=1)
-        return torch.square(foot_height)#(torch.exp(-torch.abs(d_min) * 100) + torch.exp(-torch.abs(d_max) * 100)) / 2
+        return torch.square(foot_height), torch.square(foot_height)#(torch.exp(-torch.abs(d_min) * 100) + torch.exp(-torch.abs(d_max) * 100)) / 2
 
     def _reward_stumble(self):
         # Penalize feet hitting vertical surfaces
@@ -1136,9 +1141,24 @@ class H1():
         # penalize high contact forces
         return torch.sum((torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1) -  self.cfg.rewards.max_contact_force).clip(min=0.), dim=1)
 
+    # def _reward_target_jt(self):
+    #     # Penalize distance to target joint angles
+    #     target_jt_error = torch.mean(torch.abs(self.dof_pos[:,10:] - self.target_jt[:,10:]), dim=1) 
+    #     return torch.exp(-4 * target_jt_error), target_jt_error
+
     def _reward_target_jt(self):
-        # Penalize distance to target joint angles
-        target_jt_error = torch.mean(torch.abs(self.dof_pos[:,10:] - self.target_jt[:,10:]), dim=1) + torch.mean((torch.abs(self.dof_pos[:,0:10] - self.default_dof_pos[:,0:10])), dim=1)
+         # Penalize distance to target joint angles
+        target_jt_error = torch.mean(torch.abs(self.dof_pos[:,10:] - self.default_dof_pos[:,10:]), dim=1) 
         return torch.exp(-4 * target_jt_error), target_jt_error
 
-    
+    def _reward_target_lower_body(self):
+        # Penalize distance to target joint angles
+        target_jt_error = torch.mean((torch.abs(self.dof_pos[:,0:10] - self.target_jt[:,0:10])), dim=1)
+        return torch.exp(-4 * target_jt_error), target_jt_error    
+
+    def _reward_energy_substeps(self):
+        # (n_envs, n_substeps, n_dofs)
+        # square sum -> (n_envs, n_substeps)
+        # mean -> (n_envs,)
+        return torch.mean(torch.sum(torch.square(self.substep_torques * self.substep_dof_vel), dim=-1), dim=-1)
+

@@ -40,6 +40,7 @@ class ActorCritic(nn.Module):
     def __init__(self,  num_actor_obs,
                         num_critic_obs,
                         num_actions,
+                        num_context,
                         actor_hidden_dims=[256, 256, 256],
                         critic_hidden_dims=[256, 256, 256],
                         activation='elu',
@@ -51,8 +52,8 @@ class ActorCritic(nn.Module):
 
         activation = get_activation(activation)
 
-        mlp_input_dim_a = num_actor_obs
-        mlp_input_dim_c = num_critic_obs
+        mlp_input_dim_a = num_actor_obs * num_context
+        mlp_input_dim_c = num_critic_obs * num_context
 
         # Policy
         actor_layers = []
@@ -117,10 +118,17 @@ class ActorCritic(nn.Module):
         return self.distribution.entropy().sum(dim=-1)
 
     def update_distribution(self, observations):
+        #print('oooo')
+        #print(observations.shape)
+        #a, b, c = observations.shape
+        #observations = torch.reshape(observations, (a, b*c)) 
         mean = self.actor(observations)
         self.distribution = Normal(mean, mean*0. + self.std)
 
     def act(self, observations, **kwargs):
+        #print('pppp')
+        a, b, c = observations.shape
+        observations = torch.reshape(observations, (a, b*c)) 
         self.update_distribution(observations)
         return self.distribution.sample()
     
@@ -128,10 +136,18 @@ class ActorCritic(nn.Module):
         return self.distribution.log_prob(actions).sum(dim=-1)
 
     def act_inference(self, observations):
+        #print('iiii')
+        a, b, c = observations.shape
+        observations = torch.reshape(observations, (a, b*c)) 
+        #print(observations.shape)
         actions_mean = self.actor(observations)
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):
+        #print('yyyy')
+        a, b, c = critic_observations.shape
+        critic_observations = torch.reshape(critic_observations, (a, b*c)) 
+        #print(critic_observations.shape)
         value = self.critic(critic_observations)
         return value
 

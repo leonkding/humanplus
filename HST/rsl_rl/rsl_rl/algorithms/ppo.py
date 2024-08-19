@@ -39,6 +39,7 @@ class PPO:
     actor_critic: ActorCriticTransformer
     def __init__(self,
                  actor_critic,
+                 teaching_actor_critic,
                  num_learning_epochs=1,
                  num_mini_batches=1,
                  clip_param=0.2,
@@ -46,6 +47,7 @@ class PPO:
                  lam=0.95,
                  value_loss_coef=1.0,
                  entropy_coef=0.0,
+                 imitation_coef = 0.02,
                  learning_rate=1e-3,
                  max_grad_norm=1.0,
                  use_clipped_value_loss=True,
@@ -63,6 +65,10 @@ class PPO:
         # PPO components
         self.actor_critic = actor_critic
         self.actor_critic.to(self.device)
+        self.teaching_actor_critic = teaching_actor_critic
+        if self.teaching_actor_critic != None:
+            #print(self.teaching_actor_critic)
+            self.teaching_actor_critic.to(self.device)
         self.storage = None # initialized later
         self.optimizer = optim.AdamW(self.actor_critic.parameters(), lr=learning_rate)
         self.transition = RolloutStorage.Transition()
@@ -73,6 +79,7 @@ class PPO:
         self.num_mini_batches = num_mini_batches
         self.value_loss_coef = value_loss_coef
         self.entropy_coef = entropy_coef
+        self.imitation_coef = imitation_coef
         self.gamma = gamma
         self.lam = lam
         self.max_grad_norm = max_grad_norm
@@ -120,6 +127,7 @@ class PPO:
     def update(self):
         mean_value_loss = 0
         mean_surrogate_loss = 0
+        mean_imitation_loss = 0
         if self.actor_critic.is_recurrent:
             generator = self.storage.recurrent_mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
         else:
@@ -128,7 +136,8 @@ class PPO:
             old_mu_batch, old_sigma_batch, hid_states_batch, masks_batch in generator:
 
 
-                self.actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
+                self.actor_critic.act(obs_batch)
+                #self.teaching_actor_critic.act(obs_batch, masks=masks_batch, hidden_states=hid_states_batch[0])
                 actions_log_prob_batch = self.actor_critic.get_actions_log_prob(actions_batch)
                 value_batch = self.actor_critic.evaluate(critic_obs_batch, masks=masks_batch, hidden_states=hid_states_batch[1])
                 mu_batch = self.actor_critic.action_mean
@@ -143,9 +152,9 @@ class PPO:
                         kl_mean = torch.mean(kl)
 
                         if kl_mean > self.desired_kl * 2.0:
-                            self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+                            self.learning_rate = max(1e-4, self.learning_rate / 1.5)
                         elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
-                            self.learning_rate = min(1e-2, self.learning_rate * 1.5)
+                            self.learning_rate = min(1e-4, self.learning_rate * 1.5)
                         
                         for param_group in self.optimizer.param_groups:
                             param_group['lr'] = self.learning_rate
@@ -168,7 +177,14 @@ class PPO:
                 else:
                     value_loss = (returns_batch - value_batch).pow(2).mean()
 
-                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+                # Imitation loss
+                # teaching_distribution = self.teaching_actor_critic.distribution
+                # distribution = self.actor_critic.distribution
+                # teaching_stddev = teaching_distribution.stddev.detach().clone()
+                # teaching_mean = teaching_distribution.mean.detach().clone()
+                # imitation_loss = torch.mean(torch.log(teaching_stddev/distribution.stddev) + (distribution.stddev**2 + (distribution.mean - teaching_mean)**2) / (2*teaching_stddev**2) - 0.5 )
+
+                loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean() #+ self.imitation_coef * imitation_loss
 
                 # Gradient step
                 self.optimizer.zero_grad()
@@ -178,10 +194,12 @@ class PPO:
 
                 mean_value_loss += value_loss.item()
                 mean_surrogate_loss += surrogate_loss.item()
+                mean_imitation_loss += 0#imitation_loss.item()
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
         mean_value_loss /= num_updates
         mean_surrogate_loss /= num_updates
+        mean_imitation_loss /= num_updates
         self.storage.clear()
 
-        return mean_value_loss, mean_surrogate_loss
+        return mean_value_loss, mean_surrogate_loss, mean_imitation_loss
